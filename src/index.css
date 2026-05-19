@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@layer components {
+  .input {
+    @apply w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-white outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100;
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background: #f8fafc;
+}

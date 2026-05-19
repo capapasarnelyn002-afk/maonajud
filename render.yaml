@@ -1,0 +1,26 @@
+# Render Blueprint — one-click deploy for Brealls Resorts
+# Docs: https://render.com/docs/blueprint-spec
+#
+# To use: push this file to GitHub, then on Render click
+# "New +" → "Blueprint" → connect your repo. Render auto-creates the service.
+
+services:
+  - type: web
+    name: brealls-resorts
+    runtime: static
+    branch: main
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+    routes:
+      # SPA rewrite — all routes serve index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
