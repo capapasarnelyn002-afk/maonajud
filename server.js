@@ -1,19 +1,13 @@
 import express from "express";
 import mysql from "mysql2/promise";
-import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
-import compression from "compression";
 
 dotenv.config();
 
 const app = express();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 app.use(cors());
-app.use(compression());
 app.use(express.json({ limit: "10mb" })); // allow data-URL image uploads
 
 // Database pool configuration
@@ -364,37 +358,6 @@ app.get("/api/bookings/customer/:customerId", async (req, res) => {
   }
 });
 
-// Helper: generate a unique booking code like "BK-20260519-43891"
-function generateBookingCode() {
-  const d = new Date();
-  const ymd =
-    d.getFullYear().toString() +
-    String(d.getMonth() + 1).padStart(2, "0") +
-    String(d.getDate()).padStart(2, "0");
-  const rand = String(Math.floor(Math.random() * 100000)).padStart(5, "0");
-  return `BK-${ymd}-${rand}`;
-}
-
-// Detect once whether the bookings table actually has a booking_code column.
-// This makes the server compatible with BOTH the small and the full schemas.
-let bookingsHasCodeColumn = null; // null = unknown, true/false once probed
-async function bookingsTableHasCodeColumn(conn) {
-  if (bookingsHasCodeColumn !== null) return bookingsHasCodeColumn;
-  try {
-    const [rows] = await conn.query(
-      `SELECT COUNT(*) AS cnt
-         FROM information_schema.columns
-        WHERE table_schema = DATABASE()
-          AND table_name   = 'bookings'
-          AND column_name  = 'booking_code'`
-    );
-    bookingsHasCodeColumn = Number(rows[0].cnt) > 0;
-  } catch {
-    bookingsHasCodeColumn = false;
-  }
-  return bookingsHasCodeColumn;
-}
-
 // Create a booking — checks conflict, computes price, inserts (transactional)
 app.post("/api/bookings", async (req, res) => {
   const {
@@ -441,61 +404,22 @@ app.post("/api/bookings", async (req, res) => {
     const payment_status =
       payment_method === "Cash on Arrival" ? "Unpaid" : "Awaiting Verification";
 
-    // 3) Insert — include booking_code if the column exists
-    const hasCode = await bookingsTableHasCodeColumn(conn);
-    let result;
-
-    if (hasCode) {
-      // Try a few times in case the random code collides with the UNIQUE index
-      let lastErr;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const booking_code = generateBookingCode();
-        try {
-          [result] = await conn.query(
-            `INSERT INTO bookings
-              (booking_code, room_id, customer_id, customer_name, customer_email, customer_phone,
-               check_in, check_out, guests,
-               total, downpayment, balance,
-               payment_method, payment_status, payment_reference, payment_proof, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
-            [
-              booking_code,
-              room_id, customer_id, customer_name, customer_email, customer_phone || null,
-              check_in, check_out, guests,
-              total, downpayment, balance,
-              payment_method, payment_status,
-              payment_reference || null, payment_proof || null,
-            ]
-          );
-          lastErr = null;
-          break;
-        } catch (e) {
-          // Retry only on duplicate booking_code; otherwise rethrow immediately
-          if (e && e.code === "ER_DUP_ENTRY") {
-            lastErr = e;
-            continue;
-          }
-          throw e;
-        }
-      }
-      if (lastErr) throw lastErr;
-    } else {
-      [result] = await conn.query(
-        `INSERT INTO bookings
-          (room_id, customer_id, customer_name, customer_email, customer_phone,
-           check_in, check_out, guests,
-           total, downpayment, balance,
-           payment_method, payment_status, payment_reference, payment_proof, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
-        [
-          room_id, customer_id, customer_name, customer_email, customer_phone || null,
-          check_in, check_out, guests,
-          total, downpayment, balance,
-          payment_method, payment_status,
-          payment_reference || null, payment_proof || null,
-        ]
-      );
-    }
+    // 3) Insert
+    const [result] = await conn.query(
+      `INSERT INTO bookings
+       (room_id, customer_id, customer_name, customer_email, customer_phone,
+        check_in, check_out, guests,
+        total, downpayment, balance,
+        payment_method, payment_status, payment_reference, payment_proof, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+      [
+        room_id, customer_id, customer_name, customer_email, customer_phone || null,
+        check_in, check_out, guests,
+        total, downpayment, balance,
+        payment_method, payment_status,
+        payment_reference || null, payment_proof || null,
+      ]
+    );
 
     await conn.commit();
     conn.release();
@@ -638,14 +562,6 @@ app.get("/api/stats", async (req, res) => {
   }
 });
 
-// Serve the React build (Vite output → dist/)
-app.use(express.static(path.join(__dirname, "dist")));
-
-// React SPA fallback — any non-API route returns index.html
-app.get(/^\/(?!api|healthz).*/, (_req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
-});
-
 // 404 for unknown API routes
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
@@ -653,5 +569,5 @@ app.use((_req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () =>
-  console.log(`✅  Brealls Resorts server running on port ${PORT}`)
+  console.log(`✅  Brealls Resorts API running on port ${PORT}`)
 );
