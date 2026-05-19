@@ -24,6 +24,15 @@ export interface Room {
 export type PaymentMethod = "GCash" | "Maya" | "Bank Transfer" | "Cash on Arrival";
 export type PaymentStatus = "Awaiting Verification" | "Paid" | "Unpaid" | "Refunded";
 
+// Minimal active-booking record used publicly for conflict detection
+export interface BookedRange {
+  id: string;
+  roomId: string;
+  checkIn: string;
+  checkOut: string;
+  status: "Pending" | "Confirmed";
+}
+
 export interface Booking {
   id: string;
   roomId: string;
