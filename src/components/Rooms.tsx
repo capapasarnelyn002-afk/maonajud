@@ -1,15 +1,15 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  createBooking,
   fileToDataUrl,
   findConflicts,
   formatPHP,
   nextAvailableFrom,
   nightsBetween,
   roomBlockingBookings,
-  uid,
   useStore,
 } from "../store";
-import type { Booking, PaymentMethod, Room, RoomType } from "../types";
+import type { BookedRange, PaymentMethod, Room, RoomType } from "../types";
 import { IconCal, IconCheck, IconImage, IconStar, IconUsers, IconX } from "./Icons";
 import type { SearchQuery } from "./Hero";
 
@@ -33,7 +33,7 @@ export function RoomsSection({
   search: SearchQuery | null;
   onGoLogin: () => void;
 }) {
-  const { rooms, bookings } = useStore();
+  const { rooms, bookedRanges } = useStore();
   const today = new Date().toISOString().slice(0, 10);
   const [filters, setFilters] = useState<Filters>({
     types: new Set(),
@@ -168,19 +168,21 @@ export function RoomsSection({
 
           {filtered.length === 0 ? (
             <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-16 text-center text-slate-500">
-              No accommodations match your filters.
+              {rooms.length === 0
+                ? "No rooms have been added yet. An administrator can add lodges & cottages from the Admin panel."
+                : "No accommodations match your filters."}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {filtered.map((room) => {
                 const conflicts = search
-                  ? findConflicts(bookings, room.id, search.checkIn, search.checkOut)
+                  ? findConflicts(bookedRanges, room.id, search.checkIn, search.checkOut)
                   : [];
-                const upcomingBlocks = roomBlockingBookings(bookings, room.id)
+                const upcomingBlocks = roomBlockingBookings(bookedRanges, room.id)
                   .filter((b) => b.checkOut >= today)
                   .sort((a, b) => a.checkIn.localeCompare(b.checkIn));
                 const nextFree = search
-                  ? nextAvailableFrom(bookings, room.id, search.checkIn)
+                  ? nextAvailableFrom(bookedRanges, room.id, search.checkIn)
                   : today;
                 const isBlocked = conflicts.length > 0;
                 return (
@@ -255,7 +257,7 @@ function RoomCard({
   onReserve: () => void;
   isBlocked: boolean;
   nextFree: string;
-  bookedRanges: Booking[];
+  bookedRanges: BookedRange[];
 }) {
   const disabled = !room.available || isBlocked;
   return (
@@ -364,8 +366,9 @@ function BookingModal({
   onClose: () => void;
   onGoLogin: () => void;
 }) {
-  const { session, bookings, setBookings, settings } = useStore();
+  const { session, bookedRanges, settings } = useStore();
   const today = new Date().toISOString().slice(0, 10);
+  const [submitting, setSubmitting] = useState(false);
   const initialCheckIn =
     search?.checkIn && search.checkIn >= today ? search.checkIn : today;
   const initialCheckOut =
@@ -421,10 +424,10 @@ function BookingModal({
   const downpayment = Math.round((total * settings.downpaymentPercent) / 100);
   const balance = total - downpayment;
 
-  const conflicts = findConflicts(bookings, room.id, checkIn, checkOut);
+  const conflicts = findConflicts(bookedRanges, room.id, checkIn, checkOut);
   const hasConflict = conflicts.length > 0;
-  const nextFree = nextAvailableFrom(bookings, room.id, today);
-  const upcomingBlocks = roomBlockingBookings(bookings, room.id)
+  const nextFree = nextAvailableFrom(bookedRanges, room.id, today);
+  const upcomingBlocks = roomBlockingBookings(bookedRanges, room.id)
     .filter((b) => b.checkOut >= today)
     .sort((a, b) => a.checkIn.localeCompare(b.checkIn));
 
@@ -476,7 +479,7 @@ function BookingModal({
 
   const submitPaymentSafe = () => {
     // re-check conflict at submit (in case state changed)
-    const stillConflict = findConflicts(bookings, room.id, checkIn, checkOut);
+    const stillConflict = findConflicts(bookedRanges, room.id, checkIn, checkOut);
     if (stillConflict.length > 0) {
       alert(
         "This room was just reserved for overlapping dates. Please pick different dates."
@@ -492,7 +495,7 @@ function BookingModal({
     setProof(url);
   };
 
-  const submitPayment = () => {
+  const submitPayment = async () => {
     if (paymentMethod !== "Cash on Arrival") {
       if (!reference.trim()) {
         alert("Please enter the payment reference / transaction number.");
@@ -500,31 +503,28 @@ function BookingModal({
       }
     }
     if (!submitPaymentSafe()) return;
-    const booking: Booking = {
-      id: uid("bk"),
-      roomId: room.id,
-      customerId: session.id,
-      customerName: session.name,
-      customerEmail: session.email,
-      customerPhone: phone || undefined,
-      checkIn,
-      checkOut,
-      guests,
-      rooms: 1,
-      status: "Pending",
-      createdAt: new Date().toISOString(),
-      total,
-      downpayment,
-      balance,
-      paymentMethod,
-      paymentStatus:
-        paymentMethod === "Cash on Arrival" ? "Unpaid" : "Awaiting Verification",
-      paymentReference: reference || undefined,
-      paymentProof: proof || undefined,
-    };
-    setBookings([booking, ...bookings]);
-    setCreatedBookingId(booking.id);
-    setStep("done");
+    setSubmitting(true);
+    try {
+      const newBooking = await createBooking({
+        roomId: room.id,
+        customerId: session.id,
+        customerName: session.name,
+        customerEmail: session.email,
+        customerPhone: phone || undefined,
+        checkIn,
+        checkOut,
+        guests,
+        paymentMethod,
+        paymentReference: reference || undefined,
+        paymentProof: proof || undefined,
+      });
+      setCreatedBookingId(newBooking.id);
+      setStep("done");
+    } catch (err) {
+      alert("Booking failed: " + ((err as Error).message || "Please try again."));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (step === "done") {
@@ -865,9 +865,10 @@ function BookingModal({
               </button>
               <button
                 onClick={submitPayment}
-                className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 rounded-lg"
+                disabled={submitting}
+                className="flex-1 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white font-semibold py-3 rounded-lg"
               >
-                Submit Reservation
+                {submitting ? "Submitting…" : "Submit Reservation"}
               </button>
             </div>
           </div>
