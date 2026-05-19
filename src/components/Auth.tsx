@@ -1,46 +1,46 @@
 import { useState } from "react";
-import { uid, useStore } from "../store";
-import type { User } from "../types";
+import { loginUser, registerUser } from "../store";
 
 export function AuthPage({ onSuccess }: { onSuccess: () => void }) {
-  const { users, setUsers, setSession } = useStore();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setError("");
-    const u = users.find((x) => x.email.toLowerCase() === email.toLowerCase());
-    if (!u || u.password !== password) {
-      setError("Invalid email or password.");
+    if (!email.trim() || !password) {
+      setError("Please enter your email and password.");
       return;
     }
-    setSession(u);
-    onSuccess();
+    setBusy(true);
+    try {
+      await loginUser(email.trim(), password);
+      onSuccess();
+    } catch (err) {
+      setError((err as Error).message || "Invalid email or password.");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     setError("");
     if (!name.trim() || !email.trim() || !password) {
       setError("Please fill in all fields.");
       return;
     }
-    if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-      setError("Email already registered.");
-      return;
+    setBusy(true);
+    try {
+      await registerUser(name.trim(), email.trim(), password);
+      onSuccess();
+    } catch (err) {
+      setError((err as Error).message || "Registration failed.");
+    } finally {
+      setBusy(false);
     }
-    const newUser: User = {
-      id: uid("u"),
-      name: name.trim(),
-      email: email.trim(),
-      password,
-      role: "customer",
-    };
-    setUsers([...users, newUser]);
-    setSession(newUser);
-    onSuccess();
   };
 
   return (
@@ -84,22 +84,13 @@ export function AuthPage({ onSuccess }: { onSuccess: () => void }) {
             )}
             <button
               onClick={handleLogin}
-              className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 rounded-lg"
+              disabled={busy}
+              className="w-full bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white font-semibold py-3 rounded-lg"
             >
-              Login
+              {busy && mode === "login" ? "Logging in…" : "Login"}
             </button>
           </div>
-          <div className="mt-5 text-xs text-slate-500 space-y-1 bg-slate-50 rounded-lg p-3">
-            <div>
-              <b>Admin:</b> admin@brealls.com / admin123
-            </div>
-            <div>
-              <b>Staff:</b> staff@brealls.com / staff123
-            </div>
-            <div>
-              <b>Customer:</b> bea002@gmail.com / bea1234
-            </div>
-          </div>
+          {/* Demo-account hints removed — accounts now come from the Aiven database. */}
         </div>
 
         {/* Register */}
@@ -149,9 +140,10 @@ export function AuthPage({ onSuccess }: { onSuccess: () => void }) {
             )}
             <button
               onClick={handleRegister}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 rounded-lg"
+              disabled={busy}
+              className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-semibold py-3 rounded-lg"
             >
-              Register
+              {busy && mode === "register" ? "Creating account…" : "Register"}
             </button>
           </div>
         </div>
