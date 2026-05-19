@@ -1,5 +1,19 @@
 import { useMemo, useRef, useState } from "react";
-import { fileToDataUrl, formatPHP, uid, useStore } from "../store";
+import {
+  createRoom,
+  deleteRoom,
+  deleteUser,
+  fileToDataUrl,
+  formatPHP,
+  toggleRoomAvailability,
+  uid,
+  updateBookingPayment,
+  updateBookingStatus,
+  updateRoom,
+  updateRoomImage,
+  updateSettings,
+  useStore,
+} from "../store";
 import type { Booking, Room, RoomType } from "../types";
 import { IconCheck, IconEdit, IconImage, IconPlus, IconTrash, IconX } from "./Icons";
 import { Labelled, Modal } from "./Rooms";
@@ -121,22 +135,31 @@ function Stat({
 }
 
 function ManageRooms() {
-  const { rooms, setRooms } = useStore();
+  const { rooms } = useStore();
   const [editing, setEditing] = useState<Room | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const remove = (id: string) => {
-    if (confirm("Delete this room?")) setRooms(rooms.filter((r) => r.id !== id));
+  const remove = async (id: string) => {
+    if (!confirm("Delete this room?")) return;
+    try {
+      await deleteRoom(id);
+    } catch (e) {
+      alert("Delete failed: " + (e as Error).message);
+    }
   };
 
-  const save = (room: Room) => {
-    if (rooms.some((r) => r.id === room.id)) {
-      setRooms(rooms.map((r) => (r.id === room.id ? room : r)));
-    } else {
-      setRooms([...rooms, room]);
+  const save = async (room: Room) => {
+    try {
+      if (rooms.some((r) => r.id === room.id)) {
+        await updateRoom(room);
+      } else {
+        await createRoom(room);
+      }
+      setEditing(null);
+      setAdding(false);
+    } catch (e) {
+      alert("Save failed: " + (e as Error).message);
     }
-    setEditing(null);
-    setAdding(false);
   };
 
   return (
@@ -158,9 +181,9 @@ function ManageRooms() {
             room={r}
             onEdit={() => setEditing(r)}
             onDelete={() => remove(r.id)}
-            onImageChange={(img) => setRooms(rooms.map((x) => (x.id === r.id ? { ...x, image: img } : x)))}
+            onImageChange={(img) => updateRoomImage(r.id, img).catch((e) => alert(e.message))}
             onToggleAvailable={() =>
-              setRooms(rooms.map((x) => (x.id === r.id ? { ...x, available: !x.available } : x)))
+              toggleRoomAvailability(r.id).catch((e) => alert(e.message))
             }
           />
         ))}
@@ -409,21 +432,17 @@ function RoomForm({
 }
 
 function ManageBookings() {
-  const { bookings, rooms, setBookings } = useStore();
+  const { bookings, rooms } = useStore();
   const [filter, setFilter] = useState<Booking["status"] | "All">("All");
   const [viewing, setViewing] = useState<Booking | null>(null);
 
   const list = filter === "All" ? bookings : bookings.filter((b) => b.status === filter);
 
   const update = (id: string, status: Booking["status"]) =>
-    setBookings(bookings.map((b) => (b.id === id ? { ...b, status } : b)));
+    updateBookingStatus(id, status).catch((e) => alert(e.message));
 
   const markPaid = (id: string) =>
-    setBookings(
-      bookings.map((b) =>
-        b.id === id ? { ...b, paymentStatus: "Paid", status: "Confirmed" } : b
-      )
-    );
+    updateBookingPayment(id, "Paid").catch((e) => alert(e.message));
 
   return (
     <div>
@@ -649,10 +668,14 @@ function StatusBadge({ status }: { status: Booking["status"] }) {
 }
 
 function SiteSettingsForm() {
-  const { settings, setSettings } = useStore();
+  const { settings } = useStore();
   const [draft, setDraft] = useState(settings);
   const fileRef = useRef<HTMLInputElement>(null);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Re-sync draft whenever settings load from the API
+  useMemo(() => setDraft(settings), [settings]);
 
   const handleHero = async (file: File) => {
     const url = await fileToDataUrl(file);
@@ -789,14 +812,22 @@ function SiteSettingsForm() {
         </div>
 
         <button
-          onClick={() => {
-            setSettings(draft);
-            setSaved(true);
-            setTimeout(() => setSaved(false), 2000);
+          onClick={async () => {
+            setSaving(true);
+            try {
+              await updateSettings(draft);
+              setSaved(true);
+              setTimeout(() => setSaved(false), 2000);
+            } catch (e) {
+              alert("Save failed: " + (e as Error).message);
+            } finally {
+              setSaving(false);
+            }
           }}
-          className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 rounded-lg"
+          disabled={saving}
+          className="w-full bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white font-semibold py-3 rounded-lg"
         >
-          {saved ? "✓ Saved!" : "Save Settings"}
+          {saving ? "Saving…" : saved ? "✓ Saved!" : "Save Settings"}
         </button>
       </div>
     </div>
@@ -804,9 +835,14 @@ function SiteSettingsForm() {
 }
 
 function ManageUsers() {
-  const { users, setUsers } = useStore();
-  const remove = (id: string) => {
-    if (confirm("Delete this user?")) setUsers(users.filter((u) => u.id !== id));
+  const { users } = useStore();
+  const remove = async (id: string) => {
+    if (!confirm("Delete this user?")) return;
+    try {
+      await deleteUser(id);
+    } catch (e) {
+      alert("Delete failed: " + (e as Error).message);
+    }
   };
   return (
     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
