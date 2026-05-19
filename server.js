@@ -1,13 +1,19 @@
 import express from "express";
 import mysql from "mysql2/promise";
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
+import compression from "compression";
 
 dotenv.config();
 
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 app.use(cors());
+app.use(compression());
 app.use(express.json({ limit: "10mb" })); // allow data-URL image uploads
 
 // Database pool configuration
@@ -632,6 +638,14 @@ app.get("/api/stats", async (req, res) => {
   }
 });
 
+// Serve the React build (Vite output → dist/)
+app.use(express.static(path.join(__dirname, "dist")));
+
+// React SPA fallback — any non-API route returns index.html
+app.get(/^\/(?!api|healthz).*/, (_req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
+
 // 404 for unknown API routes
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
@@ -639,5 +653,5 @@ app.use((_req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () =>
-  console.log(`✅  Brealls Resorts API running on port ${PORT}`)
+  console.log(`✅  Brealls Resorts server running on port ${PORT}`)
 );
